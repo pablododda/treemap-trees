@@ -1,0 +1,51 @@
+name: Build tree tiles
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_url:
+        description: "A .osm.pbf to read instead of the whole planet (for quick tests, e.g. a Geofabrik country)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "17 3 * * 1" # weekly, Monday 03:17 UTC
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install osmium
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq osmium-tool
+          pip install --quiet osmium
+      - name: Extract trees from OpenStreetMap
+        run: scripts/extract.sh "${{ inputs.source_url }}"
+      - name: Build tiles
+        run: python3 scripts/build_tiles.py trees.osm.pbf site
+      - name: Add readme to the site
+        run: cp README.md site/README.md
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
