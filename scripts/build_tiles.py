@@ -19,6 +19,7 @@ from collections import defaultdict
 import osmium
 
 Z = 13
+COVERAGE_Z = 11
 KEYS = ["species", "genus", "taxon", "leaf_type", "leaf_cycle", "height", "diameter_crown", "species:wikidata"]
 NAME_KEYS = ("species", "genus", "taxon")
 
@@ -93,6 +94,22 @@ def main():
     }
     with open(os.path.join(out, "index.json"), "w", encoding="utf-8") as f:
         json.dump(index, f, ensure_ascii=False, indent=1)
+    # where in the world there are mapped trees, for TreeMap's map seen from far out: zoom-11 cells (about 20 km at
+    # the equator) with how many trees each, as a flat list x0,y0,count0,x1,y1,count1,...
+    cov = defaultdict(int)
+    n = 2 ** COVERAGE_Z
+    for rows in h.tiles.values():
+        for row in rows:
+            lat, lon = row[1], row[2]
+            x = int((lon + 180.0) / 360.0 * n)
+            r = math.radians(max(min(lat, 85.0511), -85.0511))
+            y = int((1.0 - math.log(math.tan(r) + 1.0 / math.cos(r)) / math.pi) / 2.0 * n)
+            cov[(min(max(x, 0), n - 1), min(max(y, 0), n - 1))] += 1
+    flat = []
+    for (x, y), c in sorted(cov.items()):
+        flat += [x, y, c]
+    with open(os.path.join(out, "coverage.json"), "w", encoding="utf-8") as f:
+        json.dump({"z": COVERAGE_Z, "cells": flat}, f, separators=(",", ":"))
     with open(os.path.join(out, ".nojekyll"), "w") as f:
         f.write("")
     print(f"{h.kept:,} of {h.seen:,} trees kept in {len(h.tiles):,} tiles; largest {biggest/1e6:.1f} MB; {time.time()-t0:.0f}s")
