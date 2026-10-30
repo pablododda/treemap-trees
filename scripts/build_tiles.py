@@ -94,9 +94,19 @@ def main():
     }
     with open(os.path.join(out, "index.json"), "w", encoding="utf-8") as f:
         json.dump(index, f, ensure_ascii=False, indent=1)
-    # where in the world there are mapped trees, for TreeMap's map seen from far out: zoom-11 cells (about 20 km at
-    # the equator) with how many trees each, as a flat list x0,y0,count0,x1,y1,count1,...
-    cov = defaultdict(int)
+    # where in the world there are mapped trees, for TreeMap's map seen from far out, as flat lists:
+    #   "cells": zoom-11 squares (about 20 km at the equator) x0,y0,count0,... (kept for older app versions);
+    #   "far": the same squares as lat,lon,count with lat/lon the tree nearest the middle of that square's trees;
+    # and coverage-near.json: "near", the zoom-13 tiles (the files under 13/) the same way, for when the map gets
+    # closer (a separate file, so the far view doesn't wait for it).
+    # Each dot sits on a real tree, so zooming into a dot always lands where trees are.
+    def medoid(rows):
+        mlat = sum(r[1] for r in rows) / len(rows)
+        mlon = sum(r[2] for r in rows) / len(rows)
+        best = min(rows, key=lambda r: (r[1] - mlat) ** 2 + (r[2] - mlon) ** 2)
+        return [round(best[1], 4), round(best[2], 4), len(rows)]
+
+    cov = defaultdict(list)
     n = 2 ** COVERAGE_Z
     for rows in h.tiles.values():
         for row in rows:
@@ -104,12 +114,17 @@ def main():
             x = int((lon + 180.0) / 360.0 * n)
             r = math.radians(max(min(lat, 85.0511), -85.0511))
             y = int((1.0 - math.log(math.tan(r) + 1.0 / math.cos(r)) / math.pi) / 2.0 * n)
-            cov[(min(max(x, 0), n - 1), min(max(y, 0), n - 1))] += 1
-    flat = []
-    for (x, y), c in sorted(cov.items()):
-        flat += [x, y, c]
+            cov[(min(max(x, 0), n - 1), min(max(y, 0), n - 1))].append(row)
+    flat, far, near = [], [], []
+    for (x, y), rows in sorted(cov.items()):
+        flat += [x, y, len(rows)]
+        far += medoid(rows)
+    for _, rows in sorted(h.tiles.items()):
+        near += medoid(rows)
     with open(os.path.join(out, "coverage.json"), "w", encoding="utf-8") as f:
-        json.dump({"z": COVERAGE_Z, "cells": flat}, f, separators=(",", ":"))
+        json.dump({"z": COVERAGE_Z, "cells": flat, "far": far}, f, separators=(",", ":"))
+    with open(os.path.join(out, "coverage-near.json"), "w", encoding="utf-8") as f:
+        json.dump({"z": Z, "near": near}, f, separators=(",", ":"))
     with open(os.path.join(out, ".nojekyll"), "w") as f:
         f.write("")
     print(f"{h.kept:,} of {h.seen:,} trees kept in {len(h.tiles):,} tiles; largest {biggest/1e6:.1f} MB; {time.time()-t0:.0f}s")
